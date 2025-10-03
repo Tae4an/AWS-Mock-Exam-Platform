@@ -424,7 +424,7 @@ export default function Index() {
                       <span className={`text-sm font-medium ${
                         user.role === 'admin' ? 'text-red-700' : 'text-slate-700'
                       }`}>
-                        {user.username} ({user.role})
+                        {user.username}
                       </span>
                     </div>
                     {quizHistory.length > 0 && (

@@ -8,7 +8,8 @@
     "lint": "eslint --quiet ./src",
     "preview": "vite preview",
     "seed:questions": "tsx scripts/seed-questions.ts",
-    "check:db": "tsx scripts/check-db.ts"
+    "check:db": "tsx scripts/check-db.ts",
+    "cleanup:auth": "tsx scripts/cleanup-orphaned-auth.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
