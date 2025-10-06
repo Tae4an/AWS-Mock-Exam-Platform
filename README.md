@@ -1,10 +1,15 @@
 # AWS Mock Exam Platform
+> AWS Solutions Architect Associate (SAA-C03) 자격증 모의고사 플랫폼
+<img width="1501" height="815" alt="image" src="https://github.com/user-attachments/assets/9869bf00-3669-4c97-8a37-eeee966d2d67" />
+<br><br>
+<div align="center">
 
-AWS Solutions Architect Associate (SAA-C03) 자격증 모의고사 플랫폼
-## 서비스 이용
 [AWS Mock Exam Platform 바로가기](https://aws-mock-exam-platform.vercel.app/)
 
 회원가입 후 994개의 AWS SAA 문제로 실전 대비 연습을 시작하세요!
+</div>
+
+---
 
 ### 주요 기능
 
@@ -13,17 +18,11 @@ AWS Solutions Architect Associate (SAA-C03) 자격증 모의고사 플랫폼
 - **실전 모드**: 130분 시간제한 모의고사 (65문제)
 - **응시 기록**: 개인별 응시 기록 및 성적 분석
 
-## 기술 스택
 
-- **Frontend**: React 19 + TypeScript + Vite
-- **UI**: TailwindCSS + shadcn/ui
-- **Backend**: Supabase (PostgreSQL, Auth)
-- **Deploy**: Vercel
 
 ## 시스템 아키텍처
-
-이 프로젝트는 **BaaS(Backend as a Service) 기반 Serverless** 아키텍처를 채택하고 있습니다.
-<img width="1395" height="385" alt="image" src="https://github.com/user-attachments/assets/56b1c84d-5e4d-4972-b90e-d18560b78ef0" />
+> 이 프로젝트는 **BaaS(Backend as a Service) 기반 Serverless** 아키텍처를 채택하고 있습니다.
+<img width="1500" height="295" alt="image" src="https://github.com/user-attachments/assets/f39cb904-2fc4-4ebb-8cee-ee4429f69ee5" />
 
 
 ### 인프라 구성
@@ -33,6 +32,13 @@ AWS Solutions Architect Associate (SAA-C03) 자격증 모의고사 플랫폼
 | **Frontend** | Vercel | React SPA 호스팅, Global CDN |
 | **Backend** | Supabase | 인증, API, 실시간 통신, 스토리지 |
 | **Database** | PostgreSQL | 데이터 저장 및 관리 (Supabase Managed) |
+
+## 기술 스택
+
+- **Frontend**: React 19 + TypeScript + Vite
+- **UI**: TailwindCSS + shadcn/ui
+- **Backend**: Supabase (PostgreSQL, Auth)
+- **Deploy**: Vercel
 
 ## 개발자용 - 로컬 실행
 
@@ -57,12 +63,9 @@ cp .env.example .env
 pnpm dev
 # http://localhost:5173 접속
 ```
-
-## 라이센스
-
-MIT License
-
 ---
+<div align="center">
 
 **Made with ❤️ for AWS Certification**
 
+</div>
