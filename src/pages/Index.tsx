@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Clock, CheckCircle, XCircle, RotateCcw, ChevronLeft, ChevronRight, BookOpen, User, Award, Timer, Zap, Target, LogOut, Home, AlertTriangle, Shield, Crown, Info } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, RotateCcw, ChevronLeft, ChevronRight, BookOpen, User, Award, Timer, Zap, Target, LogOut, Home, AlertTriangle, Shield, Crown, Info, Shuffle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthModal } from '../components/AuthModal';
 import { quizService, questionService, Question } from '../lib/supabase';
@@ -38,8 +38,8 @@ interface QuizResult {
 }
 
 const QUIZ_QUESTIONS = {
-  short: 20,
-  full: 65
+  short: 65,  // 빠른 연습
+  full: 0     // 0 = 전체 문제
 };
 
 const TIME_LIMITS = {
@@ -190,11 +190,34 @@ export default function Index() {
       return;
     }
 
-    const questionCount = Math.min(QUIZ_QUESTIONS[length], allQuestions.length);
-    const timeLimit = mode === 'exam' ? TIME_LIMITS[length] : 0;
-    const shuffledQuestions = shuffleArray(allQuestions).slice(0, questionCount);
+    // 문제 개수 결정
+    let questionCount;
+    if (mode === 'exam') {
+      // 시험 모드는 항상 65문제 (또는 전체 문제가 65개 미만이면 전체)
+      questionCount = Math.min(65, allQuestions.length);
+    } else if (length === 'full') {
+      // 연습 모드 - 전체 연습: 전체 문제
+      questionCount = allQuestions.length;
+    } else {
+      // 연습 모드 - 빠른 연습: 65문제
+      questionCount = Math.min(QUIZ_QUESTIONS.short, allQuestions.length);
+    }
     
-    setQuestions(shuffledQuestions);
+    const timeLimit = mode === 'exam' ? TIME_LIMITS[length] : 0;
+    
+    // 연습 모드의 전체 연습은 순서대로, 나머지는 랜덤 섞기
+    let selectedQuestions;
+    if (mode === 'practice' && length === 'full') {
+      // 전체 연습 모드: 순서대로 (섞지 않음)
+      selectedQuestions = allQuestions.slice(0, questionCount);
+      console.log('📚 전체 연습 모드: 문제 순서대로 출제 (' + questionCount + '개)');
+    } else {
+      // 빠른 연습, 실전 모드: 랜덤으로 섞기
+      selectedQuestions = shuffleArray(allQuestions).slice(0, questionCount);
+      console.log('🔀 문제 랜덤 섞기 활성화 (' + questionCount + '개)');
+    }
+    
+    setQuestions(selectedQuestions);
     setQuizState({
       mode,
       length,
@@ -537,12 +560,12 @@ export default function Index() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
                     <Timer className="h-4 w-4 text-teal-500" />
                     <div>
                       <div className="text-xs font-semibold text-slate-800">무제한</div>
-                      <div className="text-xs text-slate-600">시간 제한</div>
+                      <div className="text-xs text-slate-600">시간</div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
@@ -552,23 +575,32 @@ export default function Index() {
                       <div className="text-xs text-slate-600">피드백</div>
                     </div>
                   </div>
+                  <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
+                    <Shuffle className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <div className="text-xs font-semibold text-slate-800">선택</div>
+                      <div className="text-xs text-slate-600">섞기</div>
+                    </div>
+                  </div>
                 </div>
                 
                 <div className="space-y-2">
                   <Button 
                     onClick={() => startQuiz('practice', 'short')} 
                     variant="outline"
-                    className="w-full h-10 text-sm border-teal-200 hover:border-teal-300 hover:bg-teal-50"
+                    className="w-full h-10 text-sm border-teal-200 hover:border-teal-300 hover:bg-teal-50 flex items-center justify-center gap-2"
                     disabled={allQuestions.length === 0}
                   >
-                    빠른 연습 ({Math.min(QUIZ_QUESTIONS.short, allQuestions.length)}문제)
+                    <Shuffle className="h-4 w-4" />
+                    빠른 연습 ({QUIZ_QUESTIONS.short}문제 랜덤)
                   </Button>
                   <Button 
                     onClick={() => startQuiz('practice', 'full')} 
-                    className="w-full h-10 text-sm bg-teal-500 hover:bg-teal-600 text-white"
+                    className="w-full h-10 text-sm bg-teal-500 hover:bg-teal-600 text-white flex items-center justify-center gap-2"
                     disabled={allQuestions.length === 0}
                   >
-                    전체 연습 ({Math.min(QUIZ_QUESTIONS.full, allQuestions.length)}문제)
+                    <BookOpen className="h-4 w-4" />
+                    전체 연습 ({allQuestions.length}문제)
                   </Button>
                 </div>
               </CardContent>
@@ -590,12 +622,12 @@ export default function Index() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
                     <Clock className="h-4 w-4 text-blue-500" />
                     <div>
                       <div className="text-xs font-semibold text-slate-800">130분</div>
-                      <div className="text-xs text-slate-600">시간 제한</div>
+                      <div className="text-xs text-slate-600">제한</div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
@@ -605,15 +637,23 @@ export default function Index() {
                       <div className="text-xs text-slate-600">환경</div>
                     </div>
                   </div>
+                  <div className="flex items-center space-x-2 p-2 bg-slate-50 rounded-lg">
+                    <Shuffle className="h-4 w-4 text-amber-500" />
+                    <div>
+                      <div className="text-xs font-semibold text-slate-800">랜덤</div>
+                      <div className="text-xs text-slate-600">섞기</div>
+                    </div>
+                  </div>
                 </div>
                 
-                <div className="space-y-2">
+                <div className="space-y-2 pt-6 pb-2">
                   <Button 
                     onClick={() => startQuiz('exam', 'full')} 
-                    className="w-full h-12 text-base bg-indigo-500 hover:bg-indigo-600 text-white"
+                    className="w-full h-12 text-base bg-indigo-500 hover:bg-indigo-600 text-white flex items-center justify-center gap-2"
                     disabled={allQuestions.length === 0}
                   >
-                    정규 모의고사 시작 ({Math.min(QUIZ_QUESTIONS.full, allQuestions.length)}문제, 130분)
+                    <Shuffle className="h-5 w-5" />
+                    정규 모의고사 시작 (65문제 랜덤, 130분)
                   </Button>
                 </div>
               </CardContent>
