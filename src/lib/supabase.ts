@@ -365,6 +365,217 @@ export const questionService = {
       console.error('❌ 문제 조회 예외:', error)
       return { success: false, error: '문제 조회 중 오류가 발생했습니다.' }
     }
+  },
+
+  async getQuestionsPaginated(page: number = 1, limit: number = 10): Promise<{ 
+    success: boolean; 
+    data?: Question[]; 
+    total?: number; 
+    totalPages?: number;
+    error?: string 
+  }> {
+    try {
+      // Get total count
+      const { count, error: countError } = await supabase
+        .from('questions')
+        .select('*', { count: 'exact', head: true })
+
+      if (countError) {
+        console.error('❌ 문제 개수 조회 오류:', countError)
+        return { success: false, error: '문제 개수 조회에 실패했습니다.' }
+      }
+
+      const totalCount = count || 0
+      const totalPages = Math.ceil(totalCount / limit)
+      const offset = (page - 1) * limit
+
+      // Get paginated data
+      const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .range(offset, offset + limit - 1)
+
+      if (error) {
+        console.error('❌ 문제 페이지 조회 오류:', error)
+        return { success: false, error: '문제를 불러오는데 실패했습니다.' }
+      }
+
+      // Parse JSON fields
+      const questions = data.map(q => ({
+        ...q,
+        options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+        answer: typeof q.answer === 'string' && q.answer.startsWith('[') ? JSON.parse(q.answer) : q.answer
+      }))
+
+      return { success: true, data: questions, total: totalCount, totalPages }
+    } catch (error) {
+      console.error('❌ 문제 페이지 조회 예외:', error)
+      return { success: false, error: '문제 조회 중 오류가 발생했습니다.' }
+    }
+  },
+
+  async createQuestion(questionData: {
+    question_text: string
+    options: Record<string, string>
+    answer: string | string[]
+    explanation?: string
+    category?: string
+    difficulty?: 'easy' | 'medium' | 'hard'
+  }): Promise<{ success: boolean; data?: Question; error?: string }> {
+    try {
+      const user = authService.getCurrentUser()
+      if (!user || user.role !== 'admin') {
+        return { success: false, error: '관리자 권한이 필요합니다.' }
+      }
+
+      const { data, error } = await supabase
+        .from('questions')
+        .insert({
+          ...questionData,
+          created_by: user.id,
+          category: questionData.category || 'SAA',
+          difficulty: questionData.difficulty || 'medium'
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error('❌ 문제 생성 오류:', error)
+        return { success: false, error: '문제 생성에 실패했습니다.' }
+      }
+
+      const question = {
+        ...data,
+        options: typeof data.options === 'string' ? JSON.parse(data.options) : data.options,
+        answer: typeof data.answer === 'string' && data.answer.startsWith('[') ? JSON.parse(data.answer) : data.answer
+      }
+
+      console.log('✅ 문제 생성 완료:', question.id)
+      return { success: true, data: question }
+    } catch (error) {
+      console.error('❌ 문제 생성 예외:', error)
+      return { success: false, error: '문제 생성 중 오류가 발생했습니다.' }
+    }
+  },
+
+  async updateQuestion(
+    questionId: string,
+    questionData: {
+      question_text?: string
+      options?: Record<string, string>
+      answer?: string | string[]
+      explanation?: string
+      category?: string
+      difficulty?: 'easy' | 'medium' | 'hard'
+    }
+  ): Promise<{ success: boolean; data?: Question; error?: string }> {
+    try {
+      const user = authService.getCurrentUser()
+      if (!user || user.role !== 'admin') {
+        return { success: false, error: '관리자 권한이 필요합니다.' }
+      }
+
+      const { data, error } = await supabase
+        .from('questions')
+        .update(questionData)
+        .eq('id', questionId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('❌ 문제 수정 오류:', error)
+        return { success: false, error: '문제 수정에 실패했습니다.' }
+      }
+
+      const question = {
+        ...data,
+        options: typeof data.options === 'string' ? JSON.parse(data.options) : data.options,
+        answer: typeof data.answer === 'string' && data.answer.startsWith('[') ? JSON.parse(data.answer) : data.answer
+      }
+
+      console.log('✅ 문제 수정 완료:', question.id)
+      return { success: true, data: question }
+    } catch (error) {
+      console.error('❌ 문제 수정 예외:', error)
+      return { success: false, error: '문제 수정 중 오류가 발생했습니다.' }
+    }
+  },
+
+  async deleteQuestion(questionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const user = authService.getCurrentUser()
+      if (!user || user.role !== 'admin') {
+        return { success: false, error: '관리자 권한이 필요합니다.' }
+      }
+
+      const { error } = await supabase
+        .from('questions')
+        .delete()
+        .eq('id', questionId)
+
+      if (error) {
+        console.error('❌ 문제 삭제 오류:', error)
+        return { success: false, error: '문제 삭제에 실패했습니다.' }
+      }
+
+      console.log('✅ 문제 삭제 완료:', questionId)
+      return { success: true }
+    } catch (error) {
+      console.error('❌ 문제 삭제 예외:', error)
+      return { success: false, error: '문제 삭제 중 오류가 발생했습니다.' }
+    }
+  },
+
+  async searchQuestions(searchTerm: string, page: number = 1, limit: number = 10): Promise<{ 
+    success: boolean; 
+    data?: Question[]; 
+    total?: number; 
+    totalPages?: number;
+    error?: string 
+  }> {
+    try {
+      const offset = (page - 1) * limit
+
+      // Get total count with search
+      const { count, error: countError } = await supabase
+        .from('questions')
+        .select('*', { count: 'exact', head: true })
+        .ilike('question_text', `%${searchTerm}%`)
+
+      if (countError) {
+        console.error('❌ 검색 결과 개수 조회 오류:', countError)
+        return { success: false, error: '검색에 실패했습니다.' }
+      }
+
+      const totalCount = count || 0
+      const totalPages = Math.ceil(totalCount / limit)
+
+      // Get paginated search results
+      const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .ilike('question_text', `%${searchTerm}%`)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + limit - 1)
+
+      if (error) {
+        console.error('❌ 검색 결과 조회 오류:', error)
+        return { success: false, error: '검색 결과를 불러오는데 실패했습니다.' }
+      }
+
+      // Parse JSON fields
+      const questions = data.map(q => ({
+        ...q,
+        options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+        answer: typeof q.answer === 'string' && q.answer.startsWith('[') ? JSON.parse(q.answer) : q.answer
+      }))
+
+      return { success: true, data: questions, total: totalCount, totalPages }
+    } catch (error) {
+      console.error('❌ 검색 예외:', error)
+      return { success: false, error: '검색 중 오류가 발생했습니다.' }
+    }
   }
 }
 

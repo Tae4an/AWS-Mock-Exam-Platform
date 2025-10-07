@@ -5,9 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Users, FileText, BarChart3, Settings, Shield, Edit, Crown, User as UserIcon, Home } from 'lucide-react';
+import { Users, FileText, BarChart3, Settings, Shield, Edit, Crown, User as UserIcon, Home, BookOpen } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { adminService, quizService, User, QuizResult } from '../lib/supabase';
+import QuestionManager from '../components/admin/QuestionManager';
 
 interface AdminStats {
   totalUsers: number;
@@ -251,6 +252,10 @@ export default function Admin() {
               <Users className="h-4 w-4 mr-2" />
               사용자 관리
             </TabsTrigger>
+            <TabsTrigger value="questions" className="data-[state=active]:bg-slate-100">
+              <BookOpen className="h-4 w-4 mr-2" />
+              문제 관리
+            </TabsTrigger>
             <TabsTrigger value="quizzes" className="data-[state=active]:bg-slate-100">
               <FileText className="h-4 w-4 mr-2" />
               응시 기록
@@ -315,6 +320,11 @@ export default function Admin() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Question Management */}
+          <TabsContent value="questions">
+            <QuestionManager />
           </TabsContent>
 
           {/* Quiz Results */}
