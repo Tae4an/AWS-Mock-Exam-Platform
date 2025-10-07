@@ -407,6 +407,7 @@ export const questionService = {
         .from('questions')
         .select('*')
         .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
 
       if (error) {
         console.error('❌ 문제 조회 오류:', error)
@@ -454,6 +455,7 @@ export const questionService = {
         .from('questions')
         .select('*')
         .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
         .range(offset, offset + limit - 1)
 
       if (error) {
@@ -617,6 +619,7 @@ export const questionService = {
         .select('*')
         .ilike('question_text', `%${searchTerm}%`)
         .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
         .range(offset, offset + limit - 1)
 
       if (error) {
