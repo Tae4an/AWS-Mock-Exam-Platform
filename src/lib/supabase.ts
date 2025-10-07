@@ -8,7 +8,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true, // 자동 토큰 갱신 활성화
+    persistSession: true, // 세션을 로컬 스토리지에 유지
+    detectSessionInUrl: true, // URL에서 세션 감지
+    storage: window.localStorage, // 세션 저장소 설정
+  }
+})
 
 export interface User {
   id: string
@@ -140,17 +147,18 @@ export const authService = {
           return { user: null, error: '프로필 생성에 실패했습니다.' }
         }
 
-        const user: User = {
-          id: authData.user.id,
-          username: username,
-          email: authData.user.email,
-          role: newProfile.role,
-          created_at: authData.user.created_at || new Date().toISOString()
-        }
+      const user: User = {
+        id: authData.user.id,
+        username: username,
+        email: authData.user.email,
+        role: newProfile.role,
+        created_at: authData.user.created_at || new Date().toISOString()
+      }
 
-        localStorage.setItem('user', JSON.stringify(user))
-        console.log('✅ Supabase 회원가입 완료 (수동 생성):', user)
-        return { user, error: null }
+      localStorage.setItem('user', JSON.stringify(user))
+      localStorage.setItem('session_created_at', new Date().getTime().toString())
+      console.log('✅ Supabase 회원가입 완료 (수동 생성, 세션 유효기간: 7일):', user)
+      return { user, error: null }
       }
 
       const user: User = {
@@ -162,8 +170,9 @@ export const authService = {
       }
 
       localStorage.setItem('user', JSON.stringify(user))
+      localStorage.setItem('session_created_at', new Date().getTime().toString())
 
-      console.log('✅ Supabase 회원가입 완료:', user)
+      console.log('✅ Supabase 회원가입 완료 (세션 유효기간: 7일):', user)
       return { user, error: null }
 
     } catch (error) {
@@ -207,6 +216,9 @@ export const authService = {
 
       console.log('✅ Supabase Auth 로그인 성공:', authData.user.id)
 
+      // Set session creation timestamp (7일 세션 관리용)
+      localStorage.setItem('session_created_at', new Date().getTime().toString())
+
       // Get user profile from database
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
@@ -238,7 +250,7 @@ export const authService = {
 
       localStorage.setItem('user', JSON.stringify(user))
 
-      console.log('✅ Supabase 로그인 완료:', user)
+      console.log('✅ Supabase 로그인 완료 (세션 유효기간: 7일):', user)
       return { user, error: null }
 
     } catch (error) {
@@ -260,11 +272,13 @@ export const authService = {
       }
       
       localStorage.removeItem('user')
+      localStorage.removeItem('session_created_at')
       
       return { error: null }
     } catch (error) {
       console.error('❌ 로그아웃 예외 오류:', error)
       localStorage.removeItem('user')
+      localStorage.removeItem('session_created_at')
       return { error: null }
     }
   },
@@ -308,6 +322,33 @@ export const authService = {
       }
 
       console.log('🔄 기존 세션 발견:', session.user.id)
+      
+      // Check session age and validity (7일 = 7 * 24 * 60 * 60 * 1000)
+      const MAX_SESSION_AGE = 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+      const sessionCreatedAt = localStorage.getItem('session_created_at')
+      const now = new Date().getTime()
+      
+      if (sessionCreatedAt) {
+        const sessionAge = now - parseInt(sessionCreatedAt)
+        if (sessionAge > MAX_SESSION_AGE) {
+          console.log('⏰ 세션이 7일을 초과하여 만료됨 - 재로그인 필요')
+          await supabase.auth.signOut()
+          localStorage.removeItem('user')
+          localStorage.removeItem('session_created_at')
+          return null
+        }
+        
+        const remainingDays = Math.floor((MAX_SESSION_AGE - sessionAge) / (1000 * 60 * 60 * 24))
+        const remainingHours = Math.floor(((MAX_SESSION_AGE - sessionAge) % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+        console.log(`⏰ 세션 유효 기간: ${remainingDays}일 ${remainingHours}시간 남음 (최대 7일)`)
+      }
+      
+      // Log token expiry time
+      if (session.expires_at) {
+        const expiresAt = new Date(session.expires_at * 1000)
+        const tokenRemainingMinutes = Math.floor((expiresAt.getTime() - now) / (1000 * 60))
+        console.log(`🔑 액세스 토큰 만료: 약 ${tokenRemainingMinutes}분 남음 (자동 갱신됨)`)
+      }
 
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
@@ -334,6 +375,25 @@ export const authService = {
       return user
     } catch (error) {
       console.error('❌ 인증 초기화 오류:', error)
+      return null
+    }
+  },
+
+  async getSessionInfo() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        return null
+      }
+
+      return {
+        userId: session.user.id,
+        expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : null,
+        refreshToken: !!session.refresh_token,
+      }
+    } catch (error) {
+      console.error('❌ 세션 정보 조회 오류:', error)
       return null
     }
   }
@@ -771,11 +831,45 @@ console.log('🔧 Supabase 실제 연결 설정:', {
   timestamp: new Date().toISOString()
 })
 
-// Listen to auth changes
-supabase.auth.onAuthStateChange((event, session) => {
+// Listen to auth changes and handle automatic token refresh
+supabase.auth.onAuthStateChange(async (event, session) => {
   console.log('🔄 Supabase Auth 상태 변경:', event, session?.user?.id)
   
   if (event === 'SIGNED_OUT') {
     localStorage.removeItem('user')
+  }
+  
+  // Update localStorage when token is refreshed
+  if (event === 'TOKEN_REFRESHED' && session?.user) {
+    console.log('🔄 토큰 자동 갱신됨:', session.user.id)
+    
+    // Update user data in localStorage
+    const { data: profileData } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .single()
+    
+    if (profileData) {
+      const user: User = {
+        id: session.user.id,
+        username: profileData.username,
+        email: session.user.email,
+        role: profileData.role || 'user',
+        created_at: profileData.created_at
+      }
+      localStorage.setItem('user', JSON.stringify(user))
+      console.log('✅ 사용자 정보 갱신됨')
+    }
+  }
+  
+  // Handle initial session
+  if (event === 'INITIAL_SESSION' && session?.user) {
+    console.log('✅ 초기 세션 확인됨:', session.user.id)
+  }
+  
+  // Log session expiry
+  if (event === 'SIGNED_OUT' && !session) {
+    console.log('⏰ 세션 만료됨 - 재로그인 필요')
   }
 })
