@@ -57,6 +57,43 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return shuffled;
 };
 
+function escapeHtml(input: string) {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderMarkdown(md?: string) {
+  if (!md) return ''
+  let html = escapeHtml(md)
+  // Code blocks ``` ```
+  html = html.replace(/```([\s\S]*?)```/g, (_m, p1) => `<pre class="bg-slate-900/90 text-slate-100 rounded-md p-3 overflow-auto"><code>${p1.replace(/\n/g, '<br/>')}</code></pre>`) 
+  // Inline code `code`
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-slate-100 rounded px-1 py-0.5 text-sm">$1</code>')
+  // Links [text](url) - only http/https
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">$1<\/a>')
+  // Autolink bare URLs (http/https)
+  html = html.replace(/(^|\s)(https?:\/\/[^\s<]+)(?=$|\s)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">$2<\/a>')
+  // Bold **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  // Italic _text_ or *text*
+  html = html.replace(/(^|\W)_(.*?)_(?=\W|$)/g, '$1<em>$2</em>')
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>')
+  // Headings #, ##, ### (line-start)
+  html = html.replace(/^###\s+(.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
+  html = html.replace(/^##\s+(.+)$/gm, '<h2 class="text-base font-semibold mt-3 mb-1">$1</h2>')
+  html = html.replace(/^#\s+(.+)$/gm, '<h1 class="text-lg font-bold mt-3 mb-1">$1</h1>')
+  // Lists - item
+  html = html.replace(/^(\s*)-\s+(.+)$/gm, '$1• $2')
+  // Line breaks
+  html = html.replace(/\n\n+/g, '</p><p>')
+  html = `<p>${html}</p>`
+  return html
+}
+
 export default function Index() {
   const { user, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -1181,11 +1218,12 @@ export default function Index() {
                     <div className="bg-white border border-slate-200 rounded-lg p-4">
                       <div className="flex items-start gap-3">
                         <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <div>
+                        <div className="w-full">
                           <h5 className="font-bold text-slate-800 text-sm mb-2">해설</h5>
-                          <p className="text-slate-700 text-sm leading-relaxed">
-                            {currentQuestion.explanation}
-                          </p>
+                          <div 
+                            className="prose prose-sm max-w-none text-slate-700"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(currentQuestion.explanation) }}
+                          />
                         </div>
                       </div>
                     </div>
