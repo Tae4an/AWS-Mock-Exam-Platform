@@ -105,6 +105,10 @@ export default function Index() {
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [quizHistory, setQuizHistory] = useState<any[]>([]);
+  const [resumeAvailable, setResumeAvailable] = useState(false);
+  const [resumeSnapshot, setResumeSnapshot] = useState<any | null>(null);
+  const [isResumeModalOpen, setIsResumeModalOpen] = useState(false);
+  const [isQuestionListOpen, setIsQuestionListOpen] = useState(false);
   const [quizState, setQuizState] = useState<QuizState>({
     mode: 'practice',
     length: 'full',
@@ -131,6 +135,41 @@ export default function Index() {
       setQuizHistory([]);
     }
   }, [user]);
+
+  // Check resume availability for practice-full
+  useEffect(() => {
+    if (!user) {
+      setResumeAvailable(false)
+      setResumeSnapshot(null)
+      return
+    }
+    const key = `resume:practice:full:${user.id}`
+    const raw = localStorage.getItem(key)
+    if (!raw) {
+      setResumeAvailable(false)
+      setResumeSnapshot(null)
+      return
+    }
+    try {
+      const data = JSON.parse(raw)
+      // Basic validation
+      if (
+        data &&
+        Array.isArray(data.questionIds) &&
+        typeof data.currentQuestionIndex === 'number' &&
+        data.currentQuestionIndex >= 1 // 1번(인덱스 0)은 이어하기 대상 제외
+      ) {
+        setResumeAvailable(true)
+        setResumeSnapshot(data)
+      } else {
+        setResumeAvailable(false)
+        setResumeSnapshot(null)
+      }
+    } catch {
+      setResumeAvailable(false)
+      setResumeSnapshot(null)
+    }
+  }, [user, allQuestions.length])
 
   // Debug user role
   useEffect(() => {
@@ -222,6 +261,9 @@ export default function Index() {
   }, [quizState.mode, quizState.isTimerActive, quizState.timeRemaining, quizState.showResults]);
 
   const startQuiz = (mode: QuizMode, length: QuizLength) => {
+    // Ensure any pending modals are closed when starting
+    setIsResumeModalOpen(false)
+    setIsQuestionListOpen(false)
     if (allQuestions.length === 0) {
       alert('문제를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
       return;
@@ -270,6 +312,86 @@ export default function Index() {
     setQuizStarted(true);
     setQuizResults([]);
   };
+
+  const handleStartPracticeFull = () => {
+    // If there's a resume snapshot, ask user whether to resume or start over
+    if (user && resumeAvailable && resumeSnapshot) {
+      setIsResumeModalOpen(true)
+      return
+    }
+    startQuiz('practice', 'full')
+  }
+
+  const confirmResume = () => {
+    setIsResumeModalOpen(false)
+    resumePracticeFull()
+  }
+  const startOver = () => {
+    setIsResumeModalOpen(false)
+    clearResume()
+    startQuiz('practice', 'full')
+  }
+
+  // Auto-save progress for practice full (user-scoped)
+  useEffect(() => {
+    if (!user) return
+    if (!quizStarted) return
+    if (!(quizState.mode === 'practice' && quizState.length === 'full')) return
+    // 1번(인덱스 0)은 이어하기에 포함하지 않음
+    if (quizState.currentQuestionIndex < 1) return
+    const key = `resume:practice:full:${user.id}`
+    const snapshot = {
+      userId: user.id,
+      questionIds: questions.map(q => q.id),
+      currentQuestionIndex: quizState.currentQuestionIndex,
+      selectedAnswers: quizState.selectedAnswers,
+      startedAt: quizState.startTime,
+      savedAt: Date.now()
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(snapshot))
+      // Offer resume when saving initial snapshot
+      setResumeAvailable(true)
+      setResumeSnapshot(snapshot)
+    } catch {}
+  }, [user, quizStarted, quizState.mode, quizState.length, quizState.currentQuestionIndex, quizState.selectedAnswers, quizState.startTime, questions])
+
+  // Clear resume on finish/cancel
+  const clearResume = () => {
+    if (!user) return
+    try {
+      localStorage.removeItem(`resume:practice:full:${user.id}`)
+    } catch {}
+    setResumeAvailable(false)
+    setResumeSnapshot(null)
+  }
+
+  const resumePracticeFull = () => {
+    if (!user || !resumeSnapshot) return
+    const { questionIds, selectedAnswers, currentQuestionIndex, startedAt } = resumeSnapshot
+    const idToQuestion = new Map(allQuestions.map(q => [q.id, q]))
+    const restoredQuestions: Question[] = []
+    for (const qid of questionIds) {
+      const q = idToQuestion.get(qid)
+      if (q) restoredQuestions.push(q)
+    }
+    const finalQuestions = restoredQuestions.length === questionIds.length ? restoredQuestions : allQuestions
+
+    setQuestions(finalQuestions)
+    setQuizState({
+      mode: 'practice',
+      length: 'full',
+      currentQuestionIndex: Math.max(1, Math.min(currentQuestionIndex || 0, finalQuestions.length - 1)), // 최소 2번째 문제(인덱스 1)
+      selectedAnswers: Array.isArray(selectedAnswers) ? selectedAnswers : [],
+      showResults: false,
+      showCurrentAnswer: false,
+      score: 0,
+      timeRemaining: TIME_LIMITS.full,
+      isTimerActive: false,
+      startTime: startedAt || Date.now()
+    })
+    setQuizStarted(true)
+  }
 
   const handleAnswerSelect = (answer: string) => {
     const currentQuestion = questions[quizState.currentQuestionIndex];
@@ -401,6 +523,7 @@ export default function Index() {
         console.error('❌ 퀴즈 결과 저장 실패:', saveResult.error);
       }
     }
+    clearResume()
   };
 
   const resetQuiz = () => {
@@ -549,6 +672,7 @@ export default function Index() {
 
         {/* 메인 컨텐츠 */}
         <div className="max-w-6xl mx-auto px-6 py-16">
+          {/* 이어하기 배너 제거: 버튼 클릭 시 모달로 처리 */}
           <div className="text-center mb-16">
             <div className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium mb-6">
               <Target className="h-4 w-4 mr-2" />
@@ -632,7 +756,7 @@ export default function Index() {
                     빠른 연습 ({QUIZ_QUESTIONS.short}문제 랜덤)
                   </Button>
                   <Button 
-                    onClick={() => startQuiz('practice', 'full')} 
+                    onClick={handleStartPracticeFull} 
                     className="w-full h-10 text-sm bg-teal-500 hover:bg-teal-600 text-white flex items-center justify-center gap-2"
                     disabled={allQuestions.length === 0}
                   >
@@ -788,6 +912,23 @@ export default function Index() {
             </p>
           </div>
         </div>
+
+        {/* 이어하기 확인 모달 - 시작 화면에서도 렌더 */}
+        <Dialog open={isResumeModalOpen} onOpenChange={setIsResumeModalOpen}>
+          <DialogContent className="sm:max-w-md bg-white border border-slate-200">
+            <DialogHeader>
+              <DialogTitle className="text-slate-800">이어서 진행하시겠습니까?</DialogTitle>
+              <DialogDescription className="text-slate-600">
+                {resumeSnapshot ? `이전에 진행하던 전체 연습이 있습니다. 문제 ${(resumeSnapshot.currentQuestionIndex || 0) + 1}번부터 이어서 하시겠습니까?` : '이전 진행 내역을 찾을 수 없습니다.'}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsResumeModalOpen(false)} className="border-slate-200">취소</Button>
+              <Button variant="outline" onClick={startOver} className="border-slate-200">처음부터</Button>
+              <Button onClick={confirmResume} className="bg-teal-500 hover:bg-teal-600 text-white">이어하기</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
       </div>
@@ -1015,7 +1156,7 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4">
-      <div className="max-w-5xl mx-auto space-y-4">
+      <div className="max-w-6xl mx-auto space-y-4">
         {/* 축소된 헤더 */}
         <Card className="bg-white border border-slate-200 shadow-sm">
           <CardContent className="p-4">
@@ -1073,209 +1214,223 @@ export default function Index() {
         {/* 문제 영역 */}
         <Card className="bg-white border border-slate-200 shadow-sm">
           <CardHeader className="border-b border-slate-200 pb-4">
-            <div className="flex items-start justify-between">
-              <CardTitle className="text-lg leading-relaxed text-slate-800 pr-4">
-                {currentQuestion.question_text}
-              </CardTitle>
-              {isMultipleChoice && (
-                <Badge variant="outline" className="ml-4 shrink-0 px-3 py-1 text-sm font-semibold border-slate-300">
-                  다중 선택
-                </Badge>
-              )}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <CardTitle className="text-lg leading-relaxed text-slate-800 pr-4">
+                  {currentQuestion.question_text}
+                </CardTitle>
+              </div>
+              <div className="flex items-center gap-2">
+                {quizState.mode === 'practice' && quizState.length === 'full' && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="border-slate-200 hover:bg-slate-50"
+                    onClick={() => setIsQuestionListOpen(true)}
+                  >
+                    문제 목록
+                  </Button>
+                )}
+                {isMultipleChoice && (
+                  <Badge variant="outline" className="ml-2 shrink-0 px-3 py-1 text-sm font-semibold border-slate-300">
+                    다중 선택
+                  </Badge>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-6 space-y-6">
-            {isMultipleChoice ? (
-              <div className="space-y-3">
-                {Object.entries(currentQuestion.options).map(([key, value]) => {
-                  const isSelected = Array.isArray(userAnswer) && userAnswer.includes(key);
-                  const isCorrect = quizState.showCurrentAnswer && Array.isArray(correctAnswer) && correctAnswer.includes(key);
-                  const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
-                  
-                  let borderColor = 'border-slate-200 hover:border-slate-300';
-                  let bgColor = 'bg-white hover:bg-slate-50';
-                  
-                  if (quizState.showCurrentAnswer) {
-                    if (isCorrect) {
-                      borderColor = 'border-teal-300';
-                      bgColor = 'bg-teal-50';
-                    } else if (isWrong) {
-                      borderColor = 'border-orange-300';
-                      bgColor = 'bg-orange-50';
-                    }
-                  } else if (isSelected) {
-                    borderColor = 'border-blue-300';
-                    bgColor = 'bg-blue-50';
-                  }
-                  
-                  return (
-                    <div
-                      key={key}
-                      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${borderColor} ${bgColor}`}
-                      onClick={() => !quizState.showCurrentAnswer && handleAnswerSelect(key)}
-                    >
-                      <div className="flex items-start gap-3">
-                        <Checkbox 
-                          checked={isSelected} 
-                          disabled={quizState.showCurrentAnswer}
-                          className="mt-0.5"
-                        />
-                        <div className="flex-1">
-                          <span className="font-bold text-blue-600 text-base mr-2">{key}.</span>
-                          <span className="text-slate-800 leading-relaxed text-base">{value}</span>
+                {isMultipleChoice ? (
+                  <div className="space-y-3">
+                    {Object.entries(currentQuestion.options).map(([key, value]) => {
+                      const isSelected = Array.isArray(userAnswer) && userAnswer.includes(key);
+                      const isCorrect = quizState.showCurrentAnswer && Array.isArray(correctAnswer) && correctAnswer.includes(key);
+                      const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
+                      
+                      let borderColor = 'border-slate-200 hover:border-slate-300';
+                      let bgColor = 'bg-white hover:bg-slate-50';
+                      
+                      if (quizState.showCurrentAnswer) {
+                        if (isCorrect) {
+                          borderColor = 'border-teal-300';
+                          bgColor = 'bg-teal-50';
+                        } else if (isWrong) {
+                          borderColor = 'border-orange-300';
+                          bgColor = 'bg-orange-50';
+                        }
+                      } else if (isSelected) {
+                        borderColor = 'border-blue-300';
+                        bgColor = 'bg-blue-50';
+                      }
+                      
+                      return (
+                        <div
+                          key={key}
+                          className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${borderColor} ${bgColor}`}
+                          onClick={() => !quizState.showCurrentAnswer && handleAnswerSelect(key)}
+                        >
+                          <div className="flex items-start gap-3">
+                            <Checkbox 
+                              checked={isSelected} 
+                              disabled={quizState.showCurrentAnswer}
+                              className="mt-0.5"
+                            />
+                            <div className="flex-1">
+                              <span className="font-bold text-blue-600 text-base mr-2">{key}.</span>
+                              <span className="text-slate-800 leading-relaxed text-base">{value}</span>
+                            </div>
+                            {quizState.showCurrentAnswer && isCorrect && (
+                              <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
+                            )}
+                            {quizState.showCurrentAnswer && isWrong && (
+                              <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                            )}
+                          </div>
                         </div>
-                        {quizState.showCurrentAnswer && isCorrect && (
-                          <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
-                        )}
-                        {quizState.showCurrentAnswer && isWrong && (
-                          <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <RadioGroup 
-                value={userAnswer as string || ''} 
-                onValueChange={(value) => !quizState.showCurrentAnswer && handleAnswerSelect(value)}
-                className="space-y-3"
-              >
-                {Object.entries(currentQuestion.options).map(([key, value]) => {
-                  const isSelected = userAnswer === key;
-                  const isCorrect = quizState.showCurrentAnswer && correctAnswer === key;
-                  const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
-                  
-                  let borderColor = 'border-slate-200 hover:border-slate-300';
-                  let bgColor = 'bg-white hover:bg-slate-50';
-                  
-                  if (quizState.showCurrentAnswer) {
-                    if (isCorrect) {
-                      borderColor = 'border-teal-300';
-                      bgColor = 'bg-teal-50';
-                    } else if (isWrong) {
-                      borderColor = 'border-orange-300';
-                      bgColor = 'bg-orange-50';
-                    }
-                  } else if (isSelected) {
-                    borderColor = 'border-blue-300';
-                    bgColor = 'bg-blue-50';
-                  }
-                  
-                  return (
-                    <div
-                      key={key}
-                      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${borderColor} ${bgColor}`}
-                      onClick={() => !quizState.showCurrentAnswer && handleAnswerSelect(key)}
-                    >
-                      <div className="flex items-start gap-3">
-                        <RadioGroupItem 
-                          value={key} 
-                          id={key}
-                          className="mt-0.5"
-                          disabled={quizState.showCurrentAnswer}
-                        />
-                        <Label htmlFor={key} className="flex-1 cursor-pointer">
-                          <span className="font-bold text-blue-600 text-base mr-2">{key}.</span>
-                          <span className="text-slate-800 leading-relaxed text-base">{value}</span>
-                        </Label>
-                        {quizState.showCurrentAnswer && isCorrect && (
-                          <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
-                        )}
-                        {quizState.showCurrentAnswer && isWrong && (
-                          <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </RadioGroup>
-            )}
-
-            {/* 연습 모드 정답 표시 */}
-            {quizState.mode === 'practice' && quizState.showCurrentAnswer && (
-              <Card className={`border ${isAnswerCorrect() ? 'border-teal-300 bg-teal-50' : 'border-orange-300 bg-orange-50'}`}>
-                <CardContent className="p-4 space-y-4">
-                  <div className="flex items-center gap-3">
-                    {isAnswerCorrect() ? (
-                      <CheckCircle className="h-6 w-6 text-teal-500" />
-                    ) : (
-                      <XCircle className="h-6 w-6 text-orange-500" />
-                    )}
-                    <span className={`font-bold text-lg ${isAnswerCorrect() ? 'text-teal-700' : 'text-orange-700'}`}>
-                      {isAnswerCorrect() ? '정답입니다!' : '틀렸습니다.'}
-                    </span>
+                      );
+                    })}
                   </div>
-                  <div className="text-sm">
-                    <span className="font-bold text-slate-700">정답: </span>
-                    <span className="text-teal-600 font-bold">
-                      {Array.isArray(correctAnswer) ? correctAnswer.join(', ') : correctAnswer}
-                    </span>
-                  </div>
-                  
-                  {/* 해설 표시 */}
-                  {currentQuestion.explanation && (
-                    <div className="bg-white border border-slate-200 rounded-lg p-4">
-                      <div className="flex items-start gap-3">
-                        <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                        <div className="w-full">
-                          <h5 className="font-bold text-slate-800 text-sm mb-2">해설</h5>
-                          <div 
-                            className="prose prose-sm max-w-none text-slate-700"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdown(currentQuestion.explanation) }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-            
-            <div className="flex justify-between items-center pt-6 border-t border-slate-200">
-              <Button 
-                variant="outline" 
-                onClick={previousQuestion}
-                disabled={quizState.currentQuestionIndex === 0}
-                className="flex items-center gap-2 px-6 py-2 border-slate-200 hover:bg-slate-50"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                이전 문제
-              </Button>
-              
-              <div className="flex gap-3">
-                {quizState.mode === 'practice' && !quizState.showCurrentAnswer && hasSelectedAnswer && (
-                  <Button 
-                    onClick={showAnswerAndNext}
-                    className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 px-6 py-2 text-white"
+                ) : (
+                  <RadioGroup 
+                    value={userAnswer as string || ''} 
+                    onValueChange={(value) => !quizState.showCurrentAnswer && handleAnswerSelect(value)}
+                    className="space-y-3"
                   >
-                    정답 확인
-                  </Button>
+                    {Object.entries(currentQuestion.options).map(([key, value]) => {
+                      const isSelected = userAnswer === key;
+                      const isCorrect = quizState.showCurrentAnswer && correctAnswer === key;
+                      const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
+                      
+                      let borderColor = 'border-slate-200 hover:border-slate-300';
+                      let bgColor = 'bg-white hover:bg-slate-50';
+                      
+                      if (quizState.showCurrentAnswer) {
+                        if (isCorrect) {
+                          borderColor = 'border-teal-300';
+                          bgColor = 'bg-teal-50';
+                        } else if (isWrong) {
+                          borderColor = 'border-orange-300';
+                          bgColor = 'bg-orange-50';
+                        }
+                      } else if (isSelected) {
+                        borderColor = 'border-blue-300';
+                        bgColor = 'bg-blue-50';
+                      }
+                      
+                      return (
+                        <div
+                          key={key}
+                          className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${borderColor} ${bgColor}`}
+                          onClick={() => !quizState.showCurrentAnswer && handleAnswerSelect(key)}
+                        >
+                          <div className="flex items-start gap-3">
+                            <RadioGroupItem 
+                              value={key} 
+                              id={key}
+                              className="mt-0.5"
+                              disabled={quizState.showCurrentAnswer}
+                            />
+                            <Label htmlFor={key} className="flex-1 cursor-pointer">
+                              <span className="font-bold text-blue-600 text-base mr-2">{key}.</span>
+                              <span className="text-slate-800 leading-relaxed text-base">{value}</span>
+                            </Label>
+                            {quizState.showCurrentAnswer && isCorrect && (
+                              <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
+                            )}
+                            {quizState.showCurrentAnswer && isWrong && (
+                              <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </RadioGroup>
+                )}
+
+                {/* 연습 모드 정답 표시 */}
+                {quizState.mode === 'practice' && quizState.showCurrentAnswer && (
+                  <Card className={`border ${isAnswerCorrect() ? 'border-teal-300 bg-teal-50' : 'border-orange-300 bg-orange-50'}`}>
+                    <CardContent className="p-4 space-y-4">
+                      <div className="flex items-center gap-3">
+                        {isAnswerCorrect() ? (
+                          <CheckCircle className="h-6 w-6 text-teal-500" />
+                        ) : (
+                          <XCircle className="h-6 w-6 text-orange-500" />
+                        )}
+                        <span className={`font-bold text-lg ${isAnswerCorrect() ? 'text-teal-700' : 'text-orange-700'}`}>
+                          {isAnswerCorrect() ? '정답입니다!' : '틀렸습니다.'}
+                        </span>
+                      </div>
+                      <div className="text-sm">
+                        <span className="font-bold text-slate-700">정답: </span>
+                        <span className="text-teal-600 font-bold">
+                          {Array.isArray(correctAnswer) ? correctAnswer.join(', ') : correctAnswer}
+                        </span>
+                      </div>
+                      
+                      {/* 해설 표시 */}
+                      {currentQuestion.explanation && (
+                        <div className="bg-white border border-slate-200 rounded-lg p-4">
+                          <div className="flex items-start gap-3">
+                            <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                            <div className="w-full">
+                              <h5 className="font-bold text-slate-800 text-sm mb-2">해설</h5>
+                              <div 
+                                className="prose prose-sm max-w-none text-slate-700"
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(currentQuestion.explanation) }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 )}
                 
-                {(quizState.mode === 'exam' || quizState.showCurrentAnswer || quizState.currentQuestionIndex === questions.length - 1) && (
-                  <>
-                    {quizState.currentQuestionIndex === questions.length - 1 ? (
+                <div className="flex justify-between items-center pt-6 border-t border-slate-200">
+                  <Button 
+                    variant="outline" 
+                    onClick={previousQuestion}
+                    disabled={quizState.currentQuestionIndex === 0}
+                    className="flex items-center gap-2 px-6 py-2 border-slate-200 hover:bg-slate-50"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    이전 문제
+                  </Button>
+                  
+                  <div className="flex gap-3">
+                    {quizState.mode === 'practice' && !quizState.showCurrentAnswer && hasSelectedAnswer && (
                       <Button 
-                        onClick={finishQuiz}
-                        className="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 px-6 py-2 text-white"
+                        onClick={showAnswerAndNext}
+                        className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 px-6 py-2 text-white"
                       >
-                        <CheckCircle className="h-4 w-4" />
-                        {quizState.mode === 'practice' ? '결과 보기' : '시험 완료'}
-                      </Button>
-                    ) : (
-                      <Button 
-                        onClick={nextQuestion}
-                        className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 px-6 py-2 text-white"
-                      >
-                        다음 문제
-                        <ChevronRight className="h-4 w-4" />
+                        정답 확인
                       </Button>
                     )}
-                  </>
-                )}
-              </div>
-            </div>
+                    
+                    {(quizState.mode === 'exam' || quizState.showCurrentAnswer || quizState.currentQuestionIndex === questions.length - 1) && (
+                      <>
+                        {quizState.currentQuestionIndex === questions.length - 1 ? (
+                          <Button 
+                            onClick={finishQuiz}
+                            className="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 px-6 py-2 text-white"
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            {quizState.mode === 'practice' ? '결과 보기' : '시험 완료'}
+                          </Button>
+                        ) : (
+                          <Button 
+                            onClick={nextQuestion}
+                            className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 px-6 py-2 text-white"
+                          >
+                            다음 문제
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
           </CardContent>
         </Card>
 
@@ -1289,7 +1444,7 @@ export default function Index() {
               </DialogTitle>
               <DialogDescription className="text-slate-600">
                 {quizState.mode === 'practice' 
-                  ? '연습을 중단하고 메인 화면으로 돌아가시겠습니까? 진행 상황이 저장되지 않습니다.'
+                  ? '연습을 중단하고 메인 화면으로 돌아가시겠습니까? 진행 상황은 자동 저장됩니다.'
                   : '시험을 취소하고 메인 화면으로 돌아가시겠습니까? 지금까지의 답안이 모두 사라집니다.'
                 }
               </DialogDescription>
@@ -1308,6 +1463,57 @@ export default function Index() {
               >
                 {quizState.mode === 'practice' ? '연습 취소' : '시험 취소'}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 이어하기 확인 모달 */}
+        <Dialog open={isResumeModalOpen} onOpenChange={setIsResumeModalOpen}>
+          <DialogContent className="sm:max-w-md bg-white border border-slate-200">
+            <DialogHeader>
+              <DialogTitle className="text-slate-800">이어서 진행하시겠습니까?</DialogTitle>
+              <DialogDescription className="text-slate-600">
+                {resumeSnapshot ? `이전에 진행하던 전체 연습이 있습니다. 문제 ${(resumeSnapshot.currentQuestionIndex || 0) + 1}번부터 이어서 하시겠습니까?` : '이전 진행 내역을 찾을 수 없습니다.'}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsResumeModalOpen(false)} className="border-slate-200">취소</Button>
+              <Button variant="outline" onClick={startOver} className="border-slate-200">처음부터</Button>
+              <Button onClick={confirmResume} className="bg-teal-500 hover:bg-teal-600 text-white">이어하기</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 문제 목록 모달 (전체 연습) */}
+        <Dialog open={isQuestionListOpen} onOpenChange={setIsQuestionListOpen}>
+          <DialogContent className="sm:max-w-lg bg-white border border-slate-200">
+            <DialogHeader>
+              <DialogTitle className="text-slate-800">문제 목록</DialogTitle>
+              <DialogDescription className="text-slate-600">번호를 선택해 해당 문제로 이동하세요.</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 max-h-[60vh] overflow-auto">
+              {questions.map((_, idx) => {
+                const answered = quizState.selectedAnswers[idx]
+                const isCurrent = idx === quizState.currentQuestionIndex
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setQuizState(prev => ({ ...prev, currentQuestionIndex: idx, showCurrentAnswer: false }))
+                      setIsQuestionListOpen(false)
+                    }}
+                    className={`h-9 rounded-md border text-sm font-medium transition-colors ${
+                      isCurrent ? 'border-blue-400 bg-blue-50 text-blue-700' : answered ? 'border-teal-300 bg-teal-50 text-teal-700' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                    title={`문제 ${idx + 1}`}
+                  >
+                    {idx + 1}
+                  </button>
+                )
+              })}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsQuestionListOpen(false)} className="border-slate-200">닫기</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
