@@ -94,6 +94,49 @@ function renderMarkdown(md?: string) {
   return html
 }
 
+const MULTI_ANSWER_DELIMITERS = /[,/&|+;]+/
+
+const normalizeAnswer = (answer: string | string[] | null | undefined): string[] => {
+  if (!answer) return []
+  if (Array.isArray(answer)) {
+    return answer.map(ans => ans.trim()).filter(Boolean)
+  }
+  const trimmed = answer.trim()
+  if (!trimmed) return []
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((ans: string) => ans.trim()).filter(Boolean)
+      }
+    } catch {
+      // ignore JSON parse errors and fallback to delimiter parsing
+    }
+  }
+
+  if (MULTI_ANSWER_DELIMITERS.test(trimmed)) {
+    return trimmed
+      .split(MULTI_ANSWER_DELIMITERS)
+      .map(ans => ans.trim())
+      .filter(Boolean)
+  }
+
+  return [trimmed]
+}
+
+const toAnswerArray = (answer: string | string[] | null | undefined): string[] => {
+  if (!answer) return []
+  if (Array.isArray(answer)) {
+    return [...answer]
+  }
+  return answer ? [answer] : []
+}
+
+const isMultipleAnswer = (answer: string | string[] | null | undefined): boolean => {
+  return normalizeAnswer(answer).length > 1
+}
+
 export default function Index() {
   const { user, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -395,13 +438,14 @@ export default function Index() {
 
   const handleAnswerSelect = (answer: string) => {
     const currentQuestion = questions[quizState.currentQuestionIndex];
-    const isMultipleChoice = Array.isArray(currentQuestion.answer);
+    const multipleChoice = isMultipleAnswer(currentQuestion.answer);
     
     setQuizState(prev => {
       const newSelectedAnswers = [...prev.selectedAnswers];
+      const existingValue = newSelectedAnswers[prev.currentQuestionIndex];
       
-      if (isMultipleChoice) {
-        const currentAnswers = newSelectedAnswers[prev.currentQuestionIndex] as string[] || [];
+      if (multipleChoice) {
+        const currentAnswers = [...toAnswerArray(existingValue)];
         if (currentAnswers.includes(answer)) {
           newSelectedAnswers[prev.currentQuestionIndex] = currentAnswers.filter(a => a !== answer);
         } else {
@@ -455,15 +499,18 @@ export default function Index() {
     
     questions.forEach((question, index) => {
       const userAnswer = currentState.selectedAnswers[index];
-      const correctAnswer = question.answer;
+      const normalizedCorrectAnswers = normalizeAnswer(question.answer);
+      const multipleChoice = normalizedCorrectAnswers.length > 1;
       let isCorrect = false;
       
-      if (Array.isArray(correctAnswer)) {
-        const userAnswerArray = Array.isArray(userAnswer) ? userAnswer : [];
-        isCorrect = correctAnswer.length === userAnswerArray.length && 
-                   correctAnswer.every(ans => userAnswerArray.includes(ans));
+      if (multipleChoice) {
+        const userAnswerArray = toAnswerArray(userAnswer);
+        isCorrect = normalizedCorrectAnswers.length === userAnswerArray.length && 
+                    normalizedCorrectAnswers.every(ans => userAnswerArray.includes(ans));
       } else {
-        isCorrect = userAnswer === correctAnswer;
+        const correctValue = normalizedCorrectAnswers[0];
+        const userValue = Array.isArray(userAnswer) ? userAnswer[0] : userAnswer;
+        isCorrect = !!correctValue && userValue === correctValue;
       }
       
       if (isCorrect) correctCount++;
@@ -471,8 +518,8 @@ export default function Index() {
       results.push({
         questionIndex: index,
         question,
-        userAnswer: userAnswer || (Array.isArray(correctAnswer) ? [] : ''),
-        correctAnswer,
+        userAnswer: userAnswer ?? (multipleChoice ? [] : ''),
+        correctAnswer: question.answer,
         isCorrect
       });
     });
@@ -1042,13 +1089,13 @@ export default function Index() {
                     </div>
                     
                     <div className="grid gap-2">
-                      {Object.entries(result.question.options).map(([key, value]) => {
-                        const isUserAnswer = Array.isArray(result.userAnswer) 
-                          ? result.userAnswer.includes(key)
-                          : result.userAnswer === key;
-                        const isCorrectAnswer = Array.isArray(result.correctAnswer)
-                          ? result.correctAnswer.includes(key)
-                          : result.correctAnswer === key;
+                      {(() => {
+                        const normalizedUserAnswers = toAnswerArray(result.userAnswer);
+                        const normalizedCorrectAnswers = normalizeAnswer(result.correctAnswer);
+                        
+                        return Object.entries(result.question.options).map(([key, value]) => {
+                          const isUserAnswer = normalizedUserAnswers.includes(key);
+                          const isCorrectAnswer = normalizedCorrectAnswers.includes(key);
                         
                         let bgColor = 'bg-white';
                         let textColor = 'text-slate-800';
@@ -1064,21 +1111,22 @@ export default function Index() {
                           textColor = 'text-orange-800';
                         }
                         
-                        return (
-                          <div key={key} className={`p-3 rounded-lg border ${bgColor} ${borderColor}`}>
-                            <div className="flex items-start gap-3">
-                              <span className={`font-bold ${textColor} text-base min-w-[1.5rem]`}>{key}.</span>
-                              <span className={`${textColor} flex-1 leading-relaxed text-sm`}>{value}</span>
-                              {isCorrectAnswer && (
-                                <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
-                              )}
-                              {isUserAnswer && !isCorrectAnswer && (
-                                <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
-                              )}
+                          return (
+                            <div key={key} className={`p-3 rounded-lg border ${bgColor} ${borderColor}`}>
+                              <div className="flex items-start gap-3">
+                                <span className={`font-bold ${textColor} text-base min-w-[1.5rem]`}>{key}.</span>
+                                <span className={`${textColor} flex-1 leading-relaxed text-sm`}>{value}</span>
+                                {isCorrectAnswer && (
+                                  <CheckCircle className="h-5 w-5 text-teal-500 flex-shrink-0" />
+                                )}
+                                {isUserAnswer && !isCorrectAnswer && (
+                                  <XCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })
+                      })()}
                     </div>
                     
                     <div className="pt-4 border-t border-slate-200">
@@ -1087,17 +1135,16 @@ export default function Index() {
                           <div>
                             <span className="font-bold text-slate-700 text-sm">정답: </span>
                             <span className="text-teal-600 font-bold text-sm">
-                              {Array.isArray(result.correctAnswer) 
-                                ? result.correctAnswer.join(', ')
-                                : result.correctAnswer}
+                              {normalizeAnswer(result.correctAnswer).join(', ')}
                             </span>
                           </div>
                           <div>
                             <span className="font-bold text-slate-700 text-sm">선택한 답: </span>
                             <span className={`font-bold text-sm ${result.isCorrect ? 'text-teal-600' : 'text-orange-600'}`}>
-                              {Array.isArray(result.userAnswer) 
-                                ? result.userAnswer.length > 0 ? result.userAnswer.join(', ') : '선택 안함'
-                                : result.userAnswer || '선택 안함'}
+                              {(() => {
+                                const answers = toAnswerArray(result.userAnswer);
+                                return answers.length > 0 ? answers.join(', ') : '선택 안함';
+                              })()}
                             </span>
                           </div>
                         </div>
@@ -1130,26 +1177,31 @@ export default function Index() {
 
   // 퀴즈 진행 화면
   const currentQuestion = questions[quizState.currentQuestionIndex];
-  const isMultipleChoice = Array.isArray(currentQuestion.answer);
+  const normalizedCorrectAnswers = normalizeAnswer(currentQuestion.answer);
+  const isMultipleChoice = normalizedCorrectAnswers.length > 1;
   const userAnswer = quizState.selectedAnswers[quizState.currentQuestionIndex];
+  const userAnswerArray = toAnswerArray(userAnswer);
   const progress = ((quizState.currentQuestionIndex + 1) / questions.length) * 100;
   const answeredCount = quizState.selectedAnswers.filter(answer => 
     Array.isArray(answer) ? answer.length > 0 : answer !== null && answer !== undefined
   ).length;
 
   const isAnswerCorrect = () => {
-    if (!quizState.showCurrentAnswer || !userAnswer) return null;
+    if (!quizState.showCurrentAnswer) return null;
+    const hasUserAnswer = Array.isArray(userAnswer) ? userAnswer.length > 0 : !!userAnswer;
+    if (!hasUserAnswer) return null;
     
-    if (Array.isArray(currentQuestion.answer)) {
-      const userAnswerArray = Array.isArray(userAnswer) ? userAnswer : [];
-      return currentQuestion.answer.length === userAnswerArray.length && 
-             currentQuestion.answer.every(ans => userAnswerArray.includes(ans));
-    } else {
-      return userAnswer === currentQuestion.answer;
+    if (isMultipleChoice) {
+      return normalizedCorrectAnswers.length === userAnswerArray.length &&
+             normalizedCorrectAnswers.every(ans => userAnswerArray.includes(ans));
     }
+
+    const correctValue = normalizedCorrectAnswers[0];
+    const userValue = Array.isArray(userAnswer) ? userAnswer[0] : userAnswer;
+    return !!correctValue && userValue === correctValue;
   };
 
-  const correctAnswer = quizState.showCurrentAnswer ? currentQuestion.answer : null;
+  const revealedCorrectAnswers = quizState.showCurrentAnswer ? normalizedCorrectAnswers : [];
   const hasSelectedAnswer = Array.isArray(userAnswer) 
     ? userAnswer.length > 0 
     : userAnswer !== null && userAnswer !== undefined;
@@ -1243,8 +1295,8 @@ export default function Index() {
                 {isMultipleChoice ? (
                   <div className="space-y-3">
                     {Object.entries(currentQuestion.options).map(([key, value]) => {
-                      const isSelected = Array.isArray(userAnswer) && userAnswer.includes(key);
-                      const isCorrect = quizState.showCurrentAnswer && Array.isArray(correctAnswer) && correctAnswer.includes(key);
+                      const isSelected = userAnswerArray.includes(key);
+                      const isCorrect = quizState.showCurrentAnswer && revealedCorrectAnswers.includes(key);
                       const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
                       
                       let borderColor = 'border-slate-200 hover:border-slate-300';
@@ -1292,13 +1344,13 @@ export default function Index() {
                   </div>
                 ) : (
                   <RadioGroup 
-                    value={userAnswer as string || ''} 
+                    value={(Array.isArray(userAnswer) ? userAnswer[0] : userAnswer) as string || ''} 
                     onValueChange={(value) => !quizState.showCurrentAnswer && handleAnswerSelect(value)}
                     className="space-y-3"
                   >
                     {Object.entries(currentQuestion.options).map(([key, value]) => {
-                      const isSelected = userAnswer === key;
-                      const isCorrect = quizState.showCurrentAnswer && correctAnswer === key;
+                      const isSelected = (Array.isArray(userAnswer) ? userAnswer[0] : userAnswer) === key;
+                      const isCorrect = quizState.showCurrentAnswer && revealedCorrectAnswers.includes(key);
                       const isWrong = quizState.showCurrentAnswer && isSelected && !isCorrect;
                       
                       let borderColor = 'border-slate-200 hover:border-slate-300';
@@ -1364,7 +1416,7 @@ export default function Index() {
                       <div className="text-sm">
                         <span className="font-bold text-slate-700">정답: </span>
                         <span className="text-teal-600 font-bold">
-                          {Array.isArray(correctAnswer) ? correctAnswer.join(', ') : correctAnswer}
+                          {normalizedCorrectAnswers.join(', ')}
                         </span>
                       </div>
                       
